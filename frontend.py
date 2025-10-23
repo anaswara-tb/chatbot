@@ -3,6 +3,7 @@ import requests
 import json
 import pandas as pd
 from datetime import datetime
+from io import StringIO
 
 API_URL = "http://localhost:8000"
 
@@ -25,18 +26,53 @@ def make_request(endpoint, method='GET', data=None, files=None):
         headers['Authorization'] = f'Bearer {st.session_state.token}'
     
     url = f"{API_URL}{endpoint}"
-    if method == 'GET':
-        response = requests.get(url, headers=headers)
-    elif method == 'POST':
-        if files:
-            response = requests.post(url, headers=headers, files=files)
-        else:
-            response = requests.post(url, headers=headers, json=data)
     
-    if response.status_code in [200, 201]:
-        return response.json()
-    else:
-        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+    try:
+        if method == 'GET':
+            response = requests.get(url, headers=headers)
+        elif method == 'POST':
+            if files:
+                # For file uploads, don't set Content-Type header (requests will set it with boundary)
+                response = requests.post(url, headers=headers, files=files)
+            else:
+                # For JSON data
+                headers['Content-Type'] = 'application/json'
+                response = requests.post(url, headers=headers, json=data)
+        
+        # Log response for debugging
+        logger_msg = f"Response status: {response.status_code}"
+        
+        if response.status_code in [200, 201]:
+            try:
+                return response.json()
+            except json.JSONDecodeError as e:
+                st.error(f"Server returned invalid JSON. Status: {response.status_code}")
+                st.error(f"Response text: {response.text[:500]}")  # Show first 500 chars
+                return None
+        else:
+            try:
+                error_detail = response.json().get('detail', 'Unknown error')
+            except:
+                error_detail = response.text or 'Unknown error'
+            st.error(f"Error ({response.status_code}): {error_detail}")
+            return None
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot connect to the API server. Make sure it's running on http://localhost:8000")
+        return None
+    except Exception as e:
+        st.error(f"Request failed: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+
+def download_from_url(url):
+    """Download file from URL"""
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.content.decode('utf-8')
+    except Exception as e:
+        st.error(f"Failed to download from URL: {str(e)}")
         return None
 
 def login_page():
@@ -170,16 +206,62 @@ def dashboard_page():
     st.divider()
     
     st.subheader("📤 Upload Dataset")
-    uploaded_file = st.file_uploader("Choose a CSV or JSON file", type=['csv', 'json'])
     
-    if uploaded_file is not None:
-        if st.button("Upload", type="primary"):
-            files = {'file': (uploaded_file.name, uploaded_file.getvalue())}
-            result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
-            if result:
-                st.success(f"Dataset uploaded successfully!")
-                st.json(result)
-                st.rerun()
+    # Tab for file upload vs URL
+    upload_tab1, upload_tab2 = st.tabs(["📁 Upload File", "🔗 From URL"])
+    
+    with upload_tab1:
+        uploaded_file = st.file_uploader("Choose a CSV or JSON file", type=['csv', 'json'], key="file_upload")
+        
+        if uploaded_file is not None:
+            if st.button("Upload File", type="primary", key="upload_file_btn"):
+                with st.spinner("Uploading..."):
+                    files = {'file': (uploaded_file.name, uploaded_file.getvalue())}
+                    result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
+                    if result:
+                        st.success(f"✅ Dataset uploaded successfully!")
+                        with st.expander("Upload Details", expanded=True):
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Records", result['record_count'])
+                            with col2:
+                                st.metric("Intents", len(result['intents']))
+                            with col3:
+                                st.metric("Entities", len(result['entities']))
+                        st.rerun()
+    
+    with upload_tab2:
+        st.info("💡 Supported sources: HuggingFace datasets, GitHub raw files, Google Drive (public), Dropbox, etc.")
+        
+        url = st.text_input(
+            "Dataset URL", 
+            placeholder="e.g., https://huggingface.co/datasets/.../raw/main/data.csv",
+            key="url_input"
+        )
+        
+        if url:
+            # Extract filename from URL
+            filename = url.split('/')[-1]
+            if not filename.endswith(('.csv', '.json')):
+                st.warning("⚠️ URL must point to a .csv or .json file")
+            else:
+                if st.button("Upload from URL", type="primary", key="upload_url_btn"):
+                    with st.spinner("Downloading and uploading..."):
+                        content = download_from_url(url)
+                        if content:
+                            files = {'file': (filename, content.encode())}
+                            result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
+                            if result:
+                                st.success(f"✅ Dataset uploaded successfully from URL!")
+                                with st.expander("Upload Details", expanded=True):
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Records", result['record_count'])
+                                    with col2:
+                                        st.metric("Intents", len(result['intents']))
+                                    with col3:
+                                        st.metric("Entities", len(result['entities']))
+                                st.rerun()
     
     st.divider()
     st.subheader("📈 Dataset Summary")
@@ -213,13 +295,19 @@ def dashboard_page():
                 
                 with col1:
                     st.write("**Intents:**")
-                    for intent in dataset['intents']:
-                        st.markdown(f"- `{intent}`")
+                    if dataset['intents']:
+                        for intent in dataset['intents']:
+                            st.markdown(f"- `{intent}`")
+                    else:
+                        st.caption("No intents found")
                 
                 with col2:
                     st.write("**Entities:**")
-                    for entity in dataset['entities']:
-                        st.markdown(f"- `{entity}`")
+                    if dataset['entities']:
+                        for entity in dataset['entities']:
+                            st.markdown(f"- `{entity}`")
+                    else:
+                        st.caption("No entities found")
                 
                 # Show preview if this dataset is selected
                 if st.session_state.preview_dataset_id == dataset['id']:
