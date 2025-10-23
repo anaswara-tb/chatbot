@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import json
+import pandas as pd
 from datetime import datetime
 
 API_URL = "http://localhost:8000"
@@ -15,6 +16,8 @@ if 'current_view' not in st.session_state:
     st.session_state.current_view = 'login'
 if 'selected_project' not in st.session_state:
     st.session_state.selected_project = None
+if 'preview_dataset_id' not in st.session_state:
+    st.session_state.preview_dataset_id = None
 
 def make_request(endpoint, method='GET', data=None, files=None):
     headers = {}
@@ -108,7 +111,8 @@ def projects_page():
             with cols[idx % 3]:
                 with st.container():
                     st.markdown(f"### 📂 {project['name']}")
-                    st.caption(f"Created: {datetime.fromisoformat(project['created_at']).strftime('%Y-%m-%d')}")
+                    created_date = str(project['created_at'])
+                    st.caption(f"Created: {created_date.split('T')[0] if 'T' in created_date else created_date[:10]}")
                     if st.button("Open", key=f"open_{project['id']}"):
                         st.session_state.selected_project = project
                         st.session_state.current_view = 'dashboard'
@@ -116,6 +120,39 @@ def projects_page():
                 st.divider()
     else:
         st.info("No projects yet. Create your first project above!")
+
+def preview_modal(dataset_id, dataset_name):
+    """Show dataset preview in a modal-like expander"""
+    result = make_request(f"/datasets/{dataset_id}/preview?limit=50")
+    
+    if result:
+        st.subheader(f"📋 Preview: {dataset_name}")
+        st.caption(f"Showing first {result['limit']} of {result['total_records']} records")
+        
+        # Convert to DataFrame for better display
+        df = pd.DataFrame(result['preview_records'])
+        
+        # Show as dataframe
+        st.dataframe(df, use_container_width=True, height=400)
+        
+        # Option to download full data
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            csv_data = df.to_csv(index=False)
+            st.download_button(
+                "⬇️ Download CSV",
+                csv_data,
+                f"{dataset_name.replace('.', '_')}_preview.csv",
+                "text/csv"
+            )
+        with col2:
+            json_data = json.dumps(result['preview_records'], indent=2)
+            st.download_button(
+                "⬇️ Download JSON",
+                json_data,
+                f"{dataset_name.replace('.', '_')}_preview.json",
+                "application/json"
+            )
 
 def dashboard_page():
     project = st.session_state.selected_project
@@ -127,6 +164,7 @@ def dashboard_page():
         if st.button("← Back to Projects"):
             st.session_state.current_view = 'projects'
             st.session_state.selected_project = None
+            st.session_state.preview_dataset_id = None
             st.rerun()
     
     st.divider()
@@ -151,7 +189,7 @@ def dashboard_page():
     if datasets:
         for dataset in datasets:
             with st.expander(f"📄 {dataset['name']}", expanded=True):
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
                     st.metric("Records", dataset['record_count'])
@@ -162,7 +200,14 @@ def dashboard_page():
                 with col3:
                     st.metric("Entities", len(dataset['entities']))
                 
-                st.write("**Uploaded:**", datetime.fromisoformat(dataset['uploaded_at']).strftime('%Y-%m-%d %H:%M'))
+                with col4:
+                    st.write("")
+                    if st.button("👁️ Preview", key=f"preview_{dataset['id']}"):
+                        st.session_state.preview_dataset_id = dataset['id']
+                        st.rerun()
+                
+                uploaded_date = str(dataset['uploaded_at'])
+                st.write("**Uploaded:**", uploaded_date.split('T')[0] if 'T' in uploaded_date else uploaded_date[:10])
                 
                 col1, col2 = st.columns(2)
                 
@@ -175,6 +220,15 @@ def dashboard_page():
                     st.write("**Entities:**")
                     for entity in dataset['entities']:
                         st.markdown(f"- `{entity}`")
+                
+                # Show preview if this dataset is selected
+                if st.session_state.preview_dataset_id == dataset['id']:
+                    st.divider()
+                    preview_modal(dataset['id'], dataset['name'])
+                    
+                    if st.button("✖️ Close Preview", key=f"close_preview_{dataset['id']}"):
+                        st.session_state.preview_dataset_id = None
+                        st.rerun()
     else:
         st.info("No datasets uploaded yet. Upload your first dataset above!")
 

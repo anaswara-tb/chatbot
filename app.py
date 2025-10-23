@@ -11,6 +11,7 @@ import csv
 from io import StringIO
 import databases
 import sqlalchemy
+from sqlalchemy import Text
 import logging
 
 # Set up logging
@@ -50,6 +51,7 @@ datasets_table = sqlalchemy.Table(
     sqlalchemy.Column("name", sqlalchemy.String(255)),
     sqlalchemy.Column("project_id", sqlalchemy.Integer, sqlalchemy.ForeignKey("projects.id")),
     sqlalchemy.Column("record_count", sqlalchemy.Integer),
+    sqlalchemy.Column("data", Text),  # Store JSON data
     sqlalchemy.Column("uploaded_at", sqlalchemy.DateTime, default=datetime.utcnow)
 )
 
@@ -205,10 +207,12 @@ async def upload_dataset(project_id: int, file: UploadFile = File(...), payload:
     
     intents, entities = extract_metadata(data)
     
+    # Store the actual dataset as JSON
     dataset_query = datasets_table.insert().values(
         name=file.filename,
         project_id=project_id,
-        record_count=len(data)
+        record_count=len(data),
+        data=json.dumps(data)  # Store as JSON string
     )
     dataset_id = await database.execute(dataset_query)
     
@@ -230,9 +234,29 @@ async def get_datasets(project_id: int, payload: dict = Depends(verify_token)):
         result.append({
             **dict(dataset),
             "intents": [i['intent_name'] for i in intents],
-            "entities": [e['entity_name'] for e in entities]
+            "entities": [e['entity_name'] for e in entities],
+            "data": None  # Don't send full data in list view
         })
     return result
+
+@app.get("/datasets/{dataset_id}/preview")
+async def get_dataset_preview(dataset_id: int, limit: int = 50, payload: dict = Depends(verify_token)):
+    """Get preview of dataset (first N records)"""
+    dataset = await database.fetch_one(datasets_table.select().where(datasets_table.c.id == dataset_id))
+    
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Parse stored JSON data
+    data = json.loads(dataset['data'])
+    
+    return {
+        "dataset_id": dataset_id,
+        "name": dataset['name'],
+        "total_records": len(data),
+        "preview_records": data[:limit],
+        "limit": limit
+    }
 
 if __name__ == "__main__":
     import uvicorn
