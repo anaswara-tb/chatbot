@@ -1,0 +1,11 @@
+Text,Tokens,Entities,Entity Count
+Book a flight to Paris tomorrow,"Book, a, flight, to, Paris, tomorrow",Paris(GPE); tomorrow(DATE),2
+Cancel my order number 12345,"Cancel, my, order, number, 12345",12345(DATE),1
+What's the weather in New York today,"What, 's, the, weather, in, New, York, today",New York(GPE); today(DATE),2
+Apply for leave from June 1st to June 5th,"Apply, for, leave, from, June, 1st, to, June, 5th",June 1st to June 5th(DATE),1
+Schedule a meeting with John at 3pm,"Schedule, a, meeting, with, John, at, 3, pm",John(PERSON); 3pm(TIME),2
+I want to check my salary,"I, want, to, check, my, salary",None,0
+"Hello, how are you?","Hello, ,, how, are, you, ?",None,0
+Transfer $500 to my savings account,"Transfer, $, 500, to, my, savings, account",500(MONEY),1
+Show me restaurants near Times Square,"Show, me, restaurants, near, Times, Square",Times Square(FAC),1
+What time does the store close?,"What, time, does, the, store, close, ?",None,0

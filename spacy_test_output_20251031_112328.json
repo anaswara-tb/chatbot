@@ -1,0 +1,207 @@
+[
+  {
+    "text": "Book a flight to Paris tomorrow",
+    "tokens": [
+      "Book",
+      "a",
+      "flight",
+      "to",
+      "Paris",
+      "tomorrow"
+    ],
+    "entities": [
+      {
+        "text": "Paris",
+        "label": "GPE",
+        "start": 17,
+        "end": 22
+      },
+      {
+        "text": "tomorrow",
+        "label": "DATE",
+        "start": 23,
+        "end": 31
+      }
+    ],
+    "entity_count": 2
+  },
+  {
+    "text": "Cancel my order number 12345",
+    "tokens": [
+      "Cancel",
+      "my",
+      "order",
+      "number",
+      "12345"
+    ],
+    "entities": [
+      {
+        "text": "12345",
+        "label": "DATE",
+        "start": 23,
+        "end": 28
+      }
+    ],
+    "entity_count": 1
+  },
+  {
+    "text": "What's the weather in New York today",
+    "tokens": [
+      "What",
+      "'s",
+      "the",
+      "weather",
+      "in",
+      "New",
+      "York",
+      "today"
+    ],
+    "entities": [
+      {
+        "text": "New York",
+        "label": "GPE",
+        "start": 22,
+        "end": 30
+      },
+      {
+        "text": "today",
+        "label": "DATE",
+        "start": 31,
+        "end": 36
+      }
+    ],
+    "entity_count": 2
+  },
+  {
+    "text": "Apply for leave from June 1st to June 5th",
+    "tokens": [
+      "Apply",
+      "for",
+      "leave",
+      "from",
+      "June",
+      "1st",
+      "to",
+      "June",
+      "5th"
+    ],
+    "entities": [
+      {
+        "text": "June 1st to June 5th",
+        "label": "DATE",
+        "start": 21,
+        "end": 41
+      }
+    ],
+    "entity_count": 1
+  },
+  {
+    "text": "Schedule a meeting with John at 3pm",
+    "tokens": [
+      "Schedule",
+      "a",
+      "meeting",
+      "with",
+      "John",
+      "at",
+      "3",
+      "pm"
+    ],
+    "entities": [
+      {
+        "text": "John",
+        "label": "PERSON",
+        "start": 24,
+        "end": 28
+      },
+      {
+        "text": "3pm",
+        "label": "TIME",
+        "start": 32,
+        "end": 35
+      }
+    ],
+    "entity_count": 2
+  },
+  {
+    "text": "I want to check my salary",
+    "tokens": [
+      "I",
+      "want",
+      "to",
+      "check",
+      "my",
+      "salary"
+    ],
+    "entities": [],
+    "entity_count": 0
+  },
+  {
+    "text": "Hello, how are you?",
+    "tokens": [
+      "Hello",
+      ",",
+      "how",
+      "are",
+      "you",
+      "?"
+    ],
+    "entities": [],
+    "entity_count": 0
+  },
+  {
+    "text": "Transfer $500 to my savings account",
+    "tokens": [
+      "Transfer",
+      "$",
+      "500",
+      "to",
+      "my",
+      "savings",
+      "account"
+    ],
+    "entities": [
+      {
+        "text": "500",
+        "label": "MONEY",
+        "start": 10,
+        "end": 13
+      }
+    ],
+    "entity_count": 1
+  },
+  {
+    "text": "Show me restaurants near Times Square",
+    "tokens": [
+      "Show",
+      "me",
+      "restaurants",
+      "near",
+      "Times",
+      "Square"
+    ],
+    "entities": [
+      {
+        "text": "Times Square",
+        "label": "FAC",
+        "start": 25,
+        "end": 37
+      }
+    ],
+    "entity_count": 1
+  },
+  {
+    "text": "What time does the store close?",
+    "tokens": [
+      "What",
+      "time",
+      "does",
+      "the",
+      "store",
+      "close",
+      "?"
+    ],
+    "entities": [],
+    "entity_count": 0
+  }
+]

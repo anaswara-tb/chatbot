@@ -3,12 +3,12 @@ import requests
 import json
 import pandas as pd
 from datetime import datetime
-from io import StringIO
 
 API_URL = "http://localhost:8000"
 
 st.set_page_config(page_title="Chatbot NLU Trainer", layout="wide")
 
+# Session state
 if 'token' not in st.session_state:
     st.session_state.token = None
 if 'user' not in st.session_state:
@@ -17,8 +17,14 @@ if 'current_view' not in st.session_state:
     st.session_state.current_view = 'login'
 if 'selected_project' not in st.session_state:
     st.session_state.selected_project = None
+if 'selected_dataset' not in st.session_state:
+    st.session_state.selected_dataset = None
 if 'preview_dataset_id' not in st.session_state:
     st.session_state.preview_dataset_id = None
+if 'current_annotation_index' not in st.session_state:
+    st.session_state.current_annotation_index = 0
+if 'annotations' not in st.session_state:
+    st.session_state.annotations = []
 
 def make_request(endpoint, method='GET', data=None, files=None):
     headers = {}
@@ -32,47 +38,22 @@ def make_request(endpoint, method='GET', data=None, files=None):
             response = requests.get(url, headers=headers)
         elif method == 'POST':
             if files:
-                # For file uploads, don't set Content-Type header (requests will set it with boundary)
                 response = requests.post(url, headers=headers, files=files)
             else:
-                # For JSON data
                 headers['Content-Type'] = 'application/json'
                 response = requests.post(url, headers=headers, json=data)
         
-        # Log response for debugging
-        logger_msg = f"Response status: {response.status_code}"
-        
         if response.status_code in [200, 201]:
-            try:
-                return response.json()
-            except json.JSONDecodeError as e:
-                st.error(f"Server returned invalid JSON. Status: {response.status_code}")
-                st.error(f"Response text: {response.text[:500]}")  # Show first 500 chars
-                return None
+            return response.json()
         else:
-            try:
-                error_detail = response.json().get('detail', 'Unknown error')
-            except:
-                error_detail = response.text or 'Unknown error'
+            error_detail = response.json().get('detail', 'Unknown error')
             st.error(f"Error ({response.status_code}): {error_detail}")
             return None
     except requests.exceptions.ConnectionError:
-        st.error("❌ Cannot connect to the API server. Make sure it's running on http://localhost:8000")
+        st.error("❌ Cannot connect to API server")
         return None
     except Exception as e:
         st.error(f"Request failed: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-
-def download_from_url(url):
-    """Download file from URL"""
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        return response.content.decode('utf-8')
-    except Exception as e:
-        st.error(f"Failed to download from URL: {str(e)}")
         return None
 
 def login_page():
@@ -158,37 +139,33 @@ def projects_page():
         st.info("No projects yet. Create your first project above!")
 
 def preview_modal(dataset_id, dataset_name):
-    """Show dataset preview in a modal-like expander"""
     result = make_request(f"/datasets/{dataset_id}/preview?limit=50")
     
     if result:
         st.subheader(f"📋 Preview: {dataset_name}")
         st.caption(f"Showing first {result['limit']} of {result['total_records']} records")
         
-        # Convert to DataFrame for better display
-        df = pd.DataFrame(result['preview_records'])
-        
-        # Show as dataframe
+        data = result['preview_records']
+        for record in data:
+            if 'entities' in record:
+                ents = record['entities']
+                if isinstance(ents, list):
+                    record['entities'] = ", ".join([str(e) for e in ents]) if ents else ""
+                elif isinstance(ents, str):
+                    record['entities'] = ents
+                else:
+                    record['entities'] = str(ents) if ents is not None else ""
+        df = pd.DataFrame(data)
+
         st.dataframe(df, use_container_width=True, height=400)
         
-        # Option to download full data
-        col1, col2, col3 = st.columns([1, 1, 2])
+        col1, col2 = st.columns(2)
         with col1:
             csv_data = df.to_csv(index=False)
-            st.download_button(
-                "⬇️ Download CSV",
-                csv_data,
-                f"{dataset_name.replace('.', '_')}_preview.csv",
-                "text/csv"
-            )
+            st.download_button("⬇️ Download CSV", csv_data, f"{dataset_name}_preview.csv", "text/csv")
         with col2:
             json_data = json.dumps(result['preview_records'], indent=2)
-            st.download_button(
-                "⬇️ Download JSON",
-                json_data,
-                f"{dataset_name.replace('.', '_')}_preview.json",
-                "application/json"
-            )
+            st.download_button("⬇️ Download JSON", json_data, f"{dataset_name}_preview.json", "application/json")
 
 def dashboard_page():
     project = st.session_state.selected_project
@@ -200,71 +177,31 @@ def dashboard_page():
         if st.button("← Back to Projects"):
             st.session_state.current_view = 'projects'
             st.session_state.selected_project = None
-            st.session_state.preview_dataset_id = None
             st.rerun()
     
     st.divider()
     
     st.subheader("📤 Upload Dataset")
+    uploaded_file = st.file_uploader("Choose a CSV or JSON file", type=['csv', 'json'])
     
-    # Tab for file upload vs URL
-    upload_tab1, upload_tab2 = st.tabs(["📁 Upload File", "🔗 From URL"])
-    
-    with upload_tab1:
-        uploaded_file = st.file_uploader("Choose a CSV or JSON file", type=['csv', 'json'], key="file_upload")
-        
-        if uploaded_file is not None:
-            if st.button("Upload File", type="primary", key="upload_file_btn"):
-                with st.spinner("Uploading..."):
-                    files = {'file': (uploaded_file.name, uploaded_file.getvalue())}
-                    result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
-                    if result:
-                        st.success(f"✅ Dataset uploaded successfully!")
-                        with st.expander("Upload Details", expanded=True):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Records", result['record_count'])
-                            with col2:
-                                st.metric("Intents", len(result['intents']))
-                            with col3:
-                                st.metric("Entities", len(result['entities']))
-                        st.rerun()
-    
-    with upload_tab2:
-        st.info("💡 Supported sources: HuggingFace datasets, GitHub raw files, Google Drive (public), Dropbox, etc.")
-        
-        url = st.text_input(
-            "Dataset URL", 
-            placeholder="e.g., https://huggingface.co/datasets/.../raw/main/data.csv",
-            key="url_input"
-        )
-        
-        if url:
-            # Extract filename from URL
-            filename = url.split('/')[-1]
-            if not filename.endswith(('.csv', '.json')):
-                st.warning("⚠️ URL must point to a .csv or .json file")
-            else:
-                if st.button("Upload from URL", type="primary", key="upload_url_btn"):
-                    with st.spinner("Downloading and uploading..."):
-                        content = download_from_url(url)
-                        if content:
-                            files = {'file': (filename, content.encode())}
-                            result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
-                            if result:
-                                st.success(f"✅ Dataset uploaded successfully from URL!")
-                                with st.expander("Upload Details", expanded=True):
-                                    col1, col2, col3 = st.columns(3)
-                                    with col1:
-                                        st.metric("Records", result['record_count'])
-                                    with col2:
-                                        st.metric("Intents", len(result['intents']))
-                                    with col3:
-                                        st.metric("Entities", len(result['entities']))
-                                st.rerun()
+    if uploaded_file is not None:
+        if st.button("Upload File", type="primary"):
+            with st.spinner("Uploading..."):
+                files = {'file': (uploaded_file.name, uploaded_file.getvalue())}
+                result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
+                if result:
+                    st.success(f"✅ Dataset uploaded!")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Records", result['record_count'])
+                    with col2:
+                        st.metric("Intents", len(result['intents']))
+                    with col3:
+                        st.metric("Entities", len(result['entities']))
+                    st.rerun()
     
     st.divider()
-    st.subheader("📈 Dataset Summary")
+    st.subheader("📈 Your Datasets")
     
     datasets = make_request(f"/projects/{project['id']}/datasets")
     
@@ -275,31 +212,29 @@ def dashboard_page():
                 
                 with col1:
                     st.metric("Records", dataset['record_count'])
-                
                 with col2:
                     st.metric("Intents", len(dataset['intents']))
-                
                 with col3:
                     st.metric("Entities", len(dataset['entities']))
-                
                 with col4:
-                    st.write("")
-                    if st.button("👁️ Preview", key=f"preview_{dataset['id']}"):
-                        st.session_state.preview_dataset_id = dataset['id']
+                    if st.button("🏷️ Annotate", key=f"annotate_{dataset['id']}"):
+                        st.session_state.selected_dataset = dataset
+                        st.session_state.current_view = 'annotation'
+                        st.session_state.current_annotation_index = 0
+                        st.session_state.annotations = []
                         st.rerun()
                 
                 uploaded_date = str(dataset['uploaded_at'])
                 st.write("**Uploaded:**", uploaded_date.split('T')[0] if 'T' in uploaded_date else uploaded_date[:10])
                 
                 col1, col2 = st.columns(2)
-                
                 with col1:
                     st.write("**Intents:**")
                     if dataset['intents']:
                         for intent in dataset['intents']:
                             st.markdown(f"- `{intent}`")
                     else:
-                        st.caption("No intents found")
+                        st.caption("No intents - Start annotating!")
                 
                 with col2:
                     st.write("**Entities:**")
@@ -307,23 +242,164 @@ def dashboard_page():
                         for entity in dataset['entities']:
                             st.markdown(f"- `{entity}`")
                     else:
-                        st.caption("No entities found")
+                        st.caption("No entities - Start annotating!")
                 
-                # Show preview if this dataset is selected
                 if st.session_state.preview_dataset_id == dataset['id']:
                     st.divider()
                     preview_modal(dataset['id'], dataset['name'])
-                    
-                    if st.button("✖️ Close Preview", key=f"close_preview_{dataset['id']}"):
+                    if st.button("✖️ Close", key=f"close_{dataset['id']}"):
                         st.session_state.preview_dataset_id = None
                         st.rerun()
     else:
         st.info("No datasets uploaded yet. Upload your first dataset above!")
 
-# Main app logic
+def annotation_page():
+    dataset = st.session_state.selected_dataset
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title(f"🏷️ Annotate: {dataset['name']}")
+    with col2:
+        if st.button("← Back"):
+            st.session_state.current_view = 'dashboard'
+            st.session_state.selected_dataset = None
+            st.session_state.annotations = []
+            st.rerun()
+    
+    st.divider()
+    
+    # Load annotations
+    if not st.session_state.annotations:
+        result = make_request(f"/datasets/{dataset['id']}/annotations?skip=0&limit=100")
+        if result:
+            st.session_state.annotations = result['annotations']
+    
+    annotations = st.session_state.annotations
+    
+    if not annotations:
+        st.info("No records to annotate")
+        return
+    
+    current_idx = st.session_state.current_annotation_index
+    total = len(annotations)
+    
+    if current_idx >= total:
+        st.success("🎉 All records annotated!")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Export JSON", use_container_width=True):
+                result = make_request(f"/datasets/{dataset['id']}/export?format=json")
+                if result:
+                    json_str = json.dumps(result['data'], indent=2)
+                    st.download_button("Download JSON", json_str, f"{dataset['name']}_annotated.json", "application/json")
+        
+        with col2:
+            if st.button("📥 Export CSV", use_container_width=True):
+                result = make_request(f"/datasets/{dataset['id']}/export?format=csv")
+                if result:
+                    df = pd.DataFrame(result['data'])
+                    csv_str = df.to_csv(index=False)
+                    st.download_button("Download CSV", csv_str, f"{dataset['name']}_annotated.csv", "text/csv")
+        return
+    
+    current_record = annotations[current_idx]
+    
+    st.progress(current_idx / total, text=f"Progress: {current_idx}/{total}")
+    
+    st.divider()
+    
+    st.subheader("📝 Current Text")
+    st.info(current_record['text'])
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🤖 AI Prediction")
+        if st.button("🔮 Predict with spaCy", use_container_width=True):
+            with st.spinner("Predicting..."):
+                result = make_request("/annotate/predict", "POST", {"text": current_record['text']})
+                if result:
+                    st.success("Prediction complete!")
+                    st.write("**Detected Entities:**")
+                    if result['entities']:
+                        for ent in result['entities']:
+                            st.markdown(f"- **{ent['text']}** → `{ent['label']}`")
+                    else:
+                        st.caption("No entities detected")
+                    st.session_state['predicted_entities'] = result['entities']
+    
+    with col2:
+        st.subheader("✏️ Manual Annotation")
+        
+        intent = st.text_input(
+            "Intent",
+            value=current_record.get('intent', ''),
+            placeholder="e.g., book_flight, cancel_order",
+            key=f"intent_{current_idx}"
+        )
+        
+        st.write("**Entities (JSON):**")
+        default_entities = st.session_state.get('predicted_entities', [])
+        if not default_entities and current_record.get('entities'):
+            default_entities = current_record['entities']
+        
+        entities_json = st.text_area(
+            "Entities",
+            value=json.dumps(default_entities, indent=2),
+            height=150,
+            placeholder='[{"text": "Paris", "label": "destination"}]',
+            key=f"entities_{current_idx}"
+        )
+    
+    st.divider()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("⬅️ Previous", disabled=(current_idx == 0), use_container_width=True):
+            st.session_state.current_annotation_index -= 1
+            st.rerun()
+    
+    with col2:
+        if st.button("➡️ Skip", use_container_width=True):
+            st.session_state.current_annotation_index += 1
+            st.rerun()
+    
+    with col3:
+        if st.button("💾 Save & Next", type="primary", use_container_width=True):
+            try:
+                entities_list = json.loads(entities_json) if entities_json else []
+                
+                save_data = {
+                    "dataset_id": dataset['id'],
+                    "record_id": current_record['id'],
+                    "text": current_record['text'],
+                    "intent": intent,
+                    "entities": entities_list
+                }
+                
+                result = make_request("/annotate/save", "POST", save_data)
+                if result:
+                    st.success("✅ Saved!")
+                    st.session_state.current_annotation_index += 1
+                    st.session_state.pop('predicted_entities', None)
+                    st.rerun()
+            except json.JSONDecodeError:
+                st.error("Invalid JSON format")
+    
+    with col4:
+        if st.button("🔄 Reset", use_container_width=True):
+            st.session_state.current_annotation_index = 0
+            st.session_state.annotations = []
+            st.rerun()
+
+# Main
 if st.session_state.token is None:
     login_page()
 elif st.session_state.current_view == 'projects':
     projects_page()
 elif st.session_state.current_view == 'dashboard':
     dashboard_page()
+elif st.session_state.current_view == 'annotation':
+    annotation_page()
