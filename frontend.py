@@ -25,6 +25,10 @@ if 'current_annotation_index' not in st.session_state:
     st.session_state.current_annotation_index = 0
 if 'annotations' not in st.session_state:
     st.session_state.annotations = []
+if 'predicted_entities' not in st.session_state:
+    st.session_state.predicted_entities = []
+if 'models' not in st.session_state:
+    st.session_state.models = []
 
 def make_request(endpoint, method='GET', data=None, files=None):
     headers = {}
@@ -38,6 +42,7 @@ def make_request(endpoint, method='GET', data=None, files=None):
             response = requests.get(url, headers=headers)
         elif method == 'POST':
             if files:
+                # files should be a dict like {'file': (filename, file_bytes, 'application/json')}
                 response = requests.post(url, headers=headers, files=files)
             else:
                 headers['Content-Type'] = 'application/json'
@@ -46,7 +51,10 @@ def make_request(endpoint, method='GET', data=None, files=None):
         if response.status_code in [200, 201]:
             return response.json()
         else:
-            error_detail = response.json().get('detail', 'Unknown error')
+            try:
+                error_detail = response.json().get('detail', 'Unknown error')
+            except Exception:
+                error_detail = response.text
             st.error(f"Error ({response.status_code}): {error_detail}")
             return None
     except requests.exceptions.ConnectionError:
@@ -128,7 +136,7 @@ def projects_page():
             with cols[idx % 3]:
                 with st.container():
                     st.markdown(f"### 📂 {project['name']}")
-                    created_date = str(project['created_at'])
+                    created_date = str(project.get('created_at', ''))
                     st.caption(f"Created: {created_date.split('T')[0] if 'T' in created_date else created_date[:10]}")
                     if st.button("Open", key=f"open_{project['id']}"):
                         st.session_state.selected_project = project
@@ -187,7 +195,8 @@ def dashboard_page():
     if uploaded_file is not None:
         if st.button("Upload File", type="primary"):
             with st.spinner("Uploading..."):
-                files = {'file': (uploaded_file.name, uploaded_file.getvalue())}
+                # requests expects files to be in tuple form (filename, bytes, content_type)
+                files = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type or 'application/octet-stream')}
                 result = make_request(f"/projects/{project['id']}/upload", "POST", files=files)
                 if result:
                     st.success(f"✅ Dataset uploaded!")
@@ -224,7 +233,7 @@ def dashboard_page():
                         st.session_state.annotations = []
                         st.rerun()
                 
-                uploaded_date = str(dataset['uploaded_at'])
+                uploaded_date = str(dataset.get('uploaded_at', ''))
                 st.write("**Uploaded:**", uploaded_date.split('T')[0] if 'T' in uploaded_date else uploaded_date[:10])
                 
                 col1, col2 = st.columns(2)
@@ -253,6 +262,33 @@ def dashboard_page():
     else:
         st.info("No datasets uploaded yet. Upload your first dataset above!")
 
+    st.divider()
+    # Models panel
+    st.subheader("🧠 Trained Models")
+    if st.button("Refresh Models"):
+        res = make_request("/models")
+        if res:
+            st.session_state.models = res.get('models', [])
+    if st.session_state.models:
+        for m in st.session_state.models:
+            with st.expander(f"Model: {m['model_name']} (Dataset {m['dataset_id']})", expanded=False):
+                st.write("Trained on:", m.get('trained_on', ''))
+                st.write("Accuracy:", m.get('accuracy', 'N/A'))
+                st.write("Path:", m.get('path', ''))
+                st.write("---")
+                st.text_input("Enter text to test this model", key=f"test_input_{m['id']}")
+                if st.button("Run Test", key=f"run_test_{m['id']}"):
+                    txt = st.session_state.get(f"test_input_{m['id']}", "")
+                    if txt:
+                        res = make_request(f"/predict_trained/{m['id']}", "POST", {"text": txt})
+                        if res:
+                            st.success(f"Predicted intent: {res.get('intent')}")
+                            st.write("Entities:")
+                            for ent in res.get('entities', []):
+                                st.write(f"- {ent['text']} → {ent['label']} ({ent['start']}:{ent['end']})")
+    else:
+        st.info("No models yet. Train models from the annotation screen.")
+
 def annotation_page():
     dataset = st.session_state.selected_dataset
     
@@ -270,7 +306,7 @@ def annotation_page():
     
     # Load annotations
     if not st.session_state.annotations:
-        result = make_request(f"/datasets/{dataset['id']}/annotations?skip=0&limit=100")
+        result = make_request(f"/datasets/{dataset['id']}/annotations?skip=0&limit=1000")
         if result:
             st.session_state.annotations = result['annotations']
     
@@ -284,7 +320,7 @@ def annotation_page():
     total = len(annotations)
     
     if current_idx >= total:
-        st.success("🎉 All records annotated!")
+        st.success("🎉 All records processed (annotated or skipped)!")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -301,6 +337,22 @@ def annotation_page():
                     df = pd.DataFrame(result['data'])
                     csv_str = df.to_csv(index=False)
                     st.download_button("Download CSV", csv_str, f"{dataset['name']}_annotated.csv", "text/csv")
+        
+        st.divider()
+        # Train model button
+        if st.button("🧠 Train Model (spaCy)", use_container_width=True):
+            with st.spinner("Training model... this may take a while depending on data size"):
+                res = make_request(f"/train_model/{dataset['id']}", "POST", {})
+                if res:
+                    st.success("Model trained successfully!")
+                    st.write("Model name:", res.get("model_name"))
+                    st.write("Accuracy:", res.get("accuracy"))
+                    st.write("Path:", res.get("path"))
+                    # Refresh models
+                    mres = make_request("/models")
+                    if mres:
+                        st.session_state.models = mres.get('models', [])
+        st.divider()
         return
     
     current_record = annotations[current_idx]
@@ -315,7 +367,7 @@ def annotation_page():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("🤖 AI Prediction")
+        st.subheader("🤖 AI Prediction (spaCy small)")
         if st.button("🔮 Predict with spaCy", use_container_width=True):
             with st.spinner("Predicting..."):
                 result = make_request("/annotate/predict", "POST", {"text": current_record['text']})
@@ -334,21 +386,27 @@ def annotation_page():
         
         intent = st.text_input(
             "Intent",
-            value=current_record.get('intent', ''),
+            value=current_record.get('intent', '') or '',
             placeholder="e.g., book_flight, cancel_order",
             key=f"intent_{current_idx}"
         )
         
-        st.write("**Entities (JSON):**")
+        st.write("**Entities (JSON)**")
         default_entities = st.session_state.get('predicted_entities', [])
         if not default_entities and current_record.get('entities'):
             default_entities = current_record['entities']
         
+        # Ensure we show a JSON string
+        try:
+            default_entities_text = json.dumps(default_entities, indent=2)
+        except Exception:
+            default_entities_text = "[]"
+        
         entities_json = st.text_area(
             "Entities",
-            value=json.dumps(default_entities, indent=2),
+            value=default_entities_text,
             height=150,
-            placeholder='[{"text": "Paris", "label": "destination"}]',
+            placeholder='[{"text": "Paris", "label": "destination", "start": 10, "end": 15}]',
             key=f"entities_{current_idx}"
         )
     

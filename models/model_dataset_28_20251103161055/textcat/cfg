@@ -1,0 +1,8 @@
+{
+  "labels":[
+    "get_salary",
+    "search_jobs"
+  ],
+  "threshold":0.0,
+  "positive_label":null
+}

@@ -1,0 +1,6 @@
+text,intent,entities
+Book a flight to Paris,book_flight,"[{'text': 'Paris', 'label': 'destination', 'start': 17, 'end': 22}]"
+Cancel my hotel reservation,cancel_booking,"[{'text': 'hotel', 'label': 'service', 'start': 10, 'end': 15}]"
+What's the weather in London?,get_weather,"[{'text': 'London', 'label': 'location', 'start': 24, 'end': 30}]"
+I want to book a train to Delhi,book_train,"[{'text': 'Delhi', 'label': 'destination', 'start': 26, 'end': 31}]"
+Find restaurants near me,find_restaurant,"[{'text': 'me', 'label': 'location', 'start': 21, 'end': 23}]"

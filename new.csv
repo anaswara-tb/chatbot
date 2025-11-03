@@ -1,0 +1,3 @@
+text,intent,entities
+Book me a flight to Paris,book_flight,[{"text": "Paris", "label": "destination"}]
+Cancel my ticket,cancel_ticket,[]

@@ -1,0 +1,3 @@
+text,intent,entities
+"Find AI jobs in USA",search_jobs,"[{""text"": ""USA"", ""label"": ""location""}]"
+"Show salaries for ML engineer",get_salary,"[{""text"": ""ML engineer"", ""label"": ""role""}]"
